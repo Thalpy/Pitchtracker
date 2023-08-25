@@ -12,11 +12,11 @@ mixer.init()
 
 # Constants
 RATE = 44100
-CHUNK = 1024 * 2
-DURATION = 5  # 10 seconds
+CHUNK = 1024 
+DURATION = 1  # 10 seconds
 NUM_CHUNKS = int(DURATION * RATE / CHUNK)
 MIN_PITCH = 50
-MAX_PITCH = 600
+MAX_PITCH = 450
 THRESHOLD = 0.01
 
 # Initialize pyaudio instance
@@ -81,40 +81,59 @@ def on_mic_change(event):
     device_index = devices[mic_var.get()]
     start_stream(device_index)
 
+def on_min_volume_change(val):
+    min_volume = float(val)
+    # Update any other elements if needed
+
 def callback(in_data, frame_count, time_info, status):
-    global canvas_pitch, canvas_spectrogram, ax_pitch, ax_spectrogram, lines_pitch, spectrogram_data, pitches
+    global min_volume, current_volume_var, canvas_pitch, canvas_spectrogram, ax_pitch, ax_spectrogram, lines_pitch, spectrogram_data, pitches
 
-    # Convert byte data to numpy array
-    signal = np.frombuffer(in_data, dtype=np.int16)
-    
-    # Calculate volume
-    volume = np.mean(np.abs(signal))
-    current_volume_var.set(f"Current Volume: {volume:.2f}")
+    try:
+        # Convert byte data to numpy array
+        signal = np.frombuffer(in_data, dtype=np.int16)
+        
+        # Calculate volume
+        volume = np.mean(np.abs(signal))
+        volume_percentage = (volume / 32767) * 300  # Convert to percentage (32767 is the max value for int16)
+        # Update the bar's height
+        bar_current_volume[0].set_height(volume_percentage)
+        # Redraw the canvas to reflect the change
+        canvas_current_volume.draw()
 
-    pitch = get_pitch(in_data, RATE)
-    pitches.append(pitch)
+        if min_volume < volume_percentage:
+            return (in_data, pyaudio.paContinue)  # Exit the callback early
 
-    if len(pitches) > NUM_CHUNKS:
-        pitches.popleft()
+        pitch = get_pitch(in_data, RATE)
+        
+        if pitch is None:
+            return (in_data, pyaudio.paContinue)  # Exit the callback early
 
-    # Update current pitch readout
-    note, note_freq = get_nearest_note(pitch)
-    current_pitch_var.set(f"Current Pitch: {note} ({note_freq:.2f} Hz)")
+        # If pitch is not None, continue with the rest of the logic
+        pitches.append(pitch)
 
-    min_pitch = float(min_pitch_entry.get())
-    lines_pitch.set_xdata(times)
-    lines_pitch.set_ydata(pitches)
-    ax_pitch.axhline(y=min_pitch, color='r', linestyle='-')
-    canvas_pitch.draw()
+        if len(pitches) > NUM_CHUNKS:
+            pitches.popleft()
 
-    # Update spectrogram
-    spectrogram_data = np.roll(spectrogram_data, -1, axis=1)
-    spectrogram_data[:, -1] = np.abs(np.fft.fft(np.frombuffer(in_data, dtype=np.int16)))[:CHUNK // 2]
-    ax_spectrogram.imshow(np.log(spectrogram_data + 1e-10), aspect='auto', origin='lower')
-    canvas_spectrogram.draw()
+        # Update current pitch readout
+        note, note_freq = get_nearest_note(pitch)
+        current_pitch_var.set(f"Current Pitch: {note} ({note_freq:.2f} Hz)")
 
-    if pitch < min_pitch:
-        mixer.Sound('se_graze.wav').play()
+        min_pitch = float(min_pitch_entry.get())
+        lines_pitch.set_xdata(times)
+        lines_pitch.set_ydata(pitches)
+        ax_pitch.axhline(y=min_pitch, color='r', linestyle='-')
+        canvas_pitch.draw()
+
+        # Update spectrogram
+        spectrogram_data = np.roll(spectrogram_data, -1, axis=1)
+        spectrogram_data[:, -1] = np.abs(np.fft.fft(np.frombuffer(in_data, dtype=np.int16)))[:CHUNK // 2]
+        ax_spectrogram.imshow(np.log(spectrogram_data + 1e-10), aspect='auto', origin='lower')
+        canvas_spectrogram.draw()
+
+        if pitch < min_pitch:
+            mixer.Sound('se_graze.wav').play()
+    except Exception as e:
+        print(f"Error in GUI update: {e}")
 
     return (in_data, pyaudio.paContinue)
 
@@ -214,17 +233,25 @@ current_pitch_var = tk.StringVar(root, value="Current Pitch: ")
 current_pitch_label = tk.Label(root, textvariable=current_pitch_var)
 current_pitch_label.pack(pady=5)
 
-# Current volume readout
-current_volume_var = tk.StringVar(root, value="Current Volume: 0")
-current_volume_label = tk.Label(root, textvariable=current_volume_var)
-current_volume_label.pack(pady=5)
+# Current volume plot
+fig_current_volume, ax_current_volume = plt.subplots(figsize=(2, 4))
+bar_current_volume = ax_current_volume.bar(0, 0, width=2, color='g')
+# ax_current_volume.set_xlim(-1, 1)
+ax_current_volume.set_title("Current Volume")
+ax_current_volume.set_ylim(0, 100)
+ax_current_volume.set_xticks([])
+canvas_current_volume = FigureCanvasTkAgg(fig_current_volume, master=root)
+canvas_current_volume.draw()
+canvas_current_volume.get_tk_widget().pack(side=tk.LEFT, fill=tk.Y)
 
 # Scale for setting minimum volume
-min_volume_label = tk.Label(root, text="Minimum Volume:")
-min_volume_label.pack(pady=5)
-min_volume_scale = tk.Scale(root, from_=0, to_=1, resolution=0.01, orient=tk.HORIZONTAL)
-min_volume_scale.set(0.1)  # Default value
-min_volume_scale.pack(pady=5)
+#min_volume_label = tk.Label(root, text="Minimum Volume (%):")
+# min_volume_label.pack(pady=5)
+min_volume = 10
+min_volume_scale = tk.Scale(root, from_=100, to_=0, resolution=1, orient=tk.VERTICAL)
+min_volume_scale.set(min_volume)  # Default value
+min_volume_scale.pack(side=tk.LEFT, fill=tk.Y)
+min_volume_scale.bind("<Motion>", lambda event: on_min_volume_change(min_volume_scale.get()))
 
 # Pitch plot
 fig_pitch, ax_pitch = plt.subplots()
