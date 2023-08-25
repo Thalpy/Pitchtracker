@@ -29,15 +29,17 @@ times = np.linspace(0, DURATION, NUM_CHUNKS)
 pitches = deque([0] * NUM_CHUNKS, maxlen=NUM_CHUNKS)
 
 def get_pitch(data, rate, THRESHOLD=0.01):
+    # Get the spicy stuff
+    data = np.frombuffer(data, dtype=np.int16)
+
+    # Too quiet? Get out of here!
     min_volume = min_volume_scale.get()
-    volume = np.mean(np.abs(signal))
+    volume = np.mean(np.abs(data))
     
     if volume < min_volume:
         return None
-
-    data = np.frombuffer(data, dtype=np.int16)
-    
-    # 1. Check if sound is too quiet
+        
+    # Check if sound is too quiet
     rms = np.sqrt(np.mean(data**2))
     if rms < THRESHOLD:
         return None
@@ -190,23 +192,14 @@ NOTES = {
     "E7": 2637.02
 }
 
-# Dropdown for microphone selection
-# Get microphones
-# Populate the devices dictionary with input devices
-devices = {}
-for i in range(audio.get_device_count()):
-    device_info = audio.get_device_info_by_index(i)
-    if device_info["maxInputChannels"] > 0:  # if it's an input device
-        devices[device_info["name"]] = i
+# GUI Components
 
-# Get the default device info
+# Dropdown for microphone selection
+devices = {audio.get_device_info_by_index(i)["name"]: i for i in range(audio.get_device_count()) if audio.get_device_info_by_index(i)["maxInputChannels"] > 0}
 default_device_info = audio.get_default_input_device_info()
-
-# Dropdown for microphone selection
-mic_var = tk.StringVar(root)
+mic_var = tk.StringVar(root, value=default_device_info["name"])
 mic_dropdown = ttk.Combobox(root, textvariable=mic_var, values=list(devices.keys()), width=50)
 mic_dropdown.pack(pady=10)
-mic_dropdown.set(default_device_info["name"])  # Set default device
 mic_dropdown.bind("<<ComboboxSelected>>", on_mic_change)
 
 # Entry for minimum pitch
@@ -221,18 +214,6 @@ current_pitch_var = tk.StringVar(root, value="Current Pitch: ")
 current_pitch_label = tk.Label(root, textvariable=current_pitch_var)
 current_pitch_label.pack(pady=5)
 
-# Pitch plot
-fig_pitch, ax_pitch = plt.subplots()
-lines_pitch, = ax_pitch.plot(times, [0]*len(times), lw=2)
-ax_pitch.set_title("Pitch Over Time")
-ax_pitch.set_xlabel("Time (s)")
-ax_pitch.set_ylabel("Pitch (Hz)")
-ax_pitch.set_ylim(MIN_PITCH, MAX_PITCH)
-ax_pitch.set_xlim(0, DURATION)
-canvas_pitch = FigureCanvasTkAgg(fig_pitch, master=root)
-canvas_pitch.draw()
-canvas_pitch.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
-
 # Current volume readout
 current_volume_var = tk.StringVar(root, value="Current Volume: 0")
 current_volume_label = tk.Label(root, textvariable=current_volume_var)
@@ -244,6 +225,18 @@ min_volume_label.pack(pady=5)
 min_volume_scale = tk.Scale(root, from_=0, to_=1, resolution=0.01, orient=tk.HORIZONTAL)
 min_volume_scale.set(0.1)  # Default value
 min_volume_scale.pack(pady=5)
+
+# Pitch plot
+fig_pitch, ax_pitch = plt.subplots()
+lines_pitch, = ax_pitch.plot(times, [0]*len(times), lw=2)
+ax_pitch.set_title("Pitch Over Time")
+ax_pitch.set_xlabel("Time (s)")
+ax_pitch.set_ylabel("Pitch (Hz)")
+ax_pitch.set_ylim(MIN_PITCH, MAX_PITCH)
+ax_pitch.set_xlim(0, DURATION)
+canvas_pitch = FigureCanvasTkAgg(fig_pitch, master=root)
+canvas_pitch.draw()
+canvas_pitch.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
 # Spectrogram plot
 fig_spectrogram, ax_spectrogram = plt.subplots()
@@ -258,9 +251,7 @@ canvas_spectrogram = FigureCanvasTkAgg(fig_spectrogram, master=root)
 canvas_spectrogram.draw()
 canvas_spectrogram.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
-pitches = deque([0] * NUM_CHUNKS, maxlen=NUM_CHUNKS)
-
-# stream = audio.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, input_device_index=mic_dropdown.current(), frames_per_buffer=CHUNK, stream_callback=callback)
+# Start the audio stream with the default device
 stream = None
 start_stream(default_device_info["index"])
 
